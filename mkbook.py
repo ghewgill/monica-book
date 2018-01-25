@@ -1,7 +1,16 @@
 from __future__ import print_function
 
 import os
+import shutil
 import sqlite3
+
+Country = {
+    1: "United States",
+    2: "Canada",
+    159: "Poland",
+    210: "Australia",
+    218: "New Zealand",
+}
 
 try:
     os.unlink("monica.db")
@@ -303,6 +312,123 @@ for s in open("monica.sql"):
 
 db.commit()
 
+
+try:
+    shutil.rmtree("epub")
+except OSError:
+    pass
+os.mkdir("epub")
+
+with open("epub/mimetype", "w") as out:
+    print("application/epub+zip", file=out)
+
 c = db.cursor()
-for r in c.execute("SELECT first_name, last_name FROM contacts ORDER BY first_name"):
-    print(r[0], r[1])
+for contact in c.execute("SELECT id, first_name, last_name FROM contacts WHERE NOT is_partial ORDER BY first_name"):
+    with open(os.path.join("epub", "-".join([contact[1], contact[2]]).lower()+".xhtml"), "w") as out:
+        print('<?xml version="1.0" encoding="utf-8"?>', file=out)
+        print('<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">', file=out)
+        print('<head>', file=out)
+        print('  <title>{} {}</title>'.format(contact[1], contact[2]), file=out)
+        print('</head>', file=out)
+        print('<body>', file=out)
+        print('<h1>{} {}</h1>'.format(contact[1], contact[2]), file=out)
+        c2 = db.cursor()
+        for address in c2.execute("SELECT street, city, province, postal_code, country_id FROM addresses WHERE contact_id = ?", (contact[0],)):
+            print('<p>', file=out)
+            if address[0]: print('{}<br />'.format(address[0]), file=out)
+            if address[1]: print('{}<br />'.format(address[1]), file=out)
+            if address[2]: print('{}<br />'.format(address[2]), file=out)
+            if address[3]: print('{}<br />'.format(address[3]), file=out)
+            if address[4]: print('{}<br />'.format(Country.get(address[4], address[4])), file=out)
+            print('</p>', file=out)
+        for contact in c2.execute("SELECT name, data FROM contact_fields, contact_field_types WHERE contact_id = ? AND contact_field_type_id = contact_field_types.id", (contact[0],)):
+            scheme = {
+                "Email": "mailto:",
+                "Phone": "tel:",
+            }
+            print('<p>{}: <a href="{}{}">{}</a></p>'.format(contact[0], scheme.get(contact[0], ""), contact[1], contact[1]), file=out)
+        print('</body>', file=out)
+        print('</html>', file=out)
+
+with open("epub/titlepage.xhtml", "w") as out:
+    print('<?xml version="1.0" encoding="utf-8"?>', file=out)
+    print('<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">', file=out)
+    print('<head>', file=out)
+    print('<title>Cover</title>', file=out)
+    print('<style type="text/css" title="override_css">', file=out)
+    print('@page {padding: 0pt; margin:0pt}', file=out)
+    print('body { text-align: center; padding:0pt; margin: 0pt; }', file=out)
+    print('</style>', file=out)
+    print('</head>', file=out)
+    print('<body>', file=out)
+    print('<div>', file=out)
+    name = c.execute("SELECT first_name, last_name FROM users").next()
+    print('Contact Database for {} {}'.format(*name), file=out)
+    print('</div>', file=out)
+    print('</body></html>', file=out)
+
+with open("epub/toc.ncx", "w") as out:
+    print('<?xml version="1.0" encoding="utf-8"?>', file=out)
+    print('<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="eng">', file=out)
+    print('<head>', file=out)
+    #print('<meta content="0c159d12-f5fe-4323-8194-f5c652b89f5c" name="dtb:uid"/>', file=out)
+    #print('<meta content="2" name="dtb:depth"/>', file=out)
+    #print('<meta content="calibre (0.8.68)" name="dtb:generator"/>', file=out)
+    #print('<meta content="0" name="dtb:totalPageCount"/>', file=out)
+    #print('<meta content="0" name="dtb:maxPageNumber"/>', file=out)
+    print('</head>', file=out)
+    print('<docTitle>', file=out)
+    print('<text>Monica Database</text>', file=out)
+    print('</docTitle>', file=out)
+    print('<navMap>', file=out)
+    for i, r in enumerate(c.execute("SELECT first_name, last_name FROM contacts WHERE NOT is_partial ORDER BY first_name")):
+        print('<navPoint id="a{i}" playOrder="{i}">'.format(i=i), file=out)
+        print('<navLabel>', file=out)
+        print('<text>{} {}</text>'.format(r[0], r[1]), file=out)
+        print('</navLabel>', file=out)
+        print('<content src="{}"/>'.format("-".join([r[0], r[1]]).lower()+".xhtml"), file=out)
+        print('</navPoint>', file=out)
+    print('</navMap>', file=out)
+    print('</ncx>', file=out)
+
+os.mkdir("epub/META-INF")
+with open("epub/META-INF/container.xml", "w") as out:
+    print('<?xml version="1.0"?>', file=out)
+    print('<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">', file=out)
+    print('<rootfiles>', file=out)
+    print('<rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>', file=out)
+    print('</rootfiles>', file=out)
+    print('</container>', file=out)
+
+with open("epub/content.opf", "w") as out:
+    print('<?xml version="1.0" encoding="utf-8"?>', file=out)
+    print('<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="uuid_id">', file=out)
+    print('<metadata xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:opf="http://www.idpf.org/2007/opf" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:calibre="http://calibre.kovidgoyal.net/2009/metadata" xmlns:dc="http://purl.org/dc/elements/1.1/">', file=out)
+    print('<dc:language>en</dc:language>', file=out)
+    print('<dc:title>Monica Database</dc:title>', file=out)
+    print('<dc:creator opf:file-as="mkbook" opf:role="aut">mkbook</dc:creator>', file=out)
+    print('<meta name="cover" content="cover"/>', file=out)
+    print('<dc:date>0101-01-01T00:00:00+00:00</dc:date>', file=out)
+    print('<dc:contributor opf:role="bkp"></dc:contributor>', file=out)
+    print('<dc:identifier id="uuid_id" opf:scheme="uuid">0c159d12-f5fe-4323-8194-f5c652b89f5c</dc:identifier>', file=out)
+    print('</metadata>', file=out)
+    print('<manifest>', file=out)
+    print('<item href="cover.jpeg" id="cover" media-type="image/jpeg"/>', file=out)
+    for i, r in enumerate(c.execute("SELECT first_name, last_name FROM contacts WHERE NOT is_partial ORDER BY first_name")):
+        print('<item href="{}" id="id{}" media-type="application/xhtml+xml" />'.format("-".join([r[0], r[1]]).lower()+".xhtml", i), file=out)
+    print('<item href="page_styles.css" id="page_css" media-type="text/css"/>', file=out)
+    print('<item href="stylesheet.css" id="css" media-type="text/css"/>', file=out)
+    print('<item href="titlepage.xhtml" id="titlepage" media-type="application/xhtml+xml"/>', file=out)
+    print('<item href="toc.ncx" media-type="application/x-dtbncx+xml" id="ncx"/>', file=out)
+    print('</manifest>', file=out)
+    print('<spine toc="ncx">', file=out)
+    print('<itemref idref="titlepage"/>', file=out)
+    for i, r in enumerate(c.execute("SELECT first_name, last_name FROM contacts WHERE NOT is_partial ORDER BY first_name")):
+        print('<itemref idref="id{}"/>'.format(i), file=out)
+    print('</spine>', file=out)
+    print('<guide>', file=out)
+    print('<reference href="titlepage.xhtml" type="cover" title="Cover"/>', file=out)
+    print('</guide>', file=out)
+    print('</package>', file=out)
+
+os.system("cd epub && zip -r monica.epub .")
